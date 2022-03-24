@@ -18,6 +18,6 @@ int ctfs_fcntl(int fd, int cmd, ...)
 
 int main(int argc, char **argv)
 {
-    ctfs_fcntl(10, 1, 2, 3, 4, 5);
+    ctfs_fcntl(10, 1, 2, 3, 4);
     return 0;
 }
