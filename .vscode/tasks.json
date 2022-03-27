@@ -4,7 +4,7 @@
           "type": "shell",
           "label": "g++ build active file",
           "command": "/usr/bin/g++",
-          "args": ["-g", "${file}", "-o", "${fileDirname}/${fileBasenameNoExtension}", "-lpthread", "-lrt"],
+          "args": ["-g", "${file}", "-o", "${fileDirname}/${fileBasenameNoExtension}.o", "-lpthread", "-lrt"],
           "options": {
             "cwd": "/usr/bin"
           },
