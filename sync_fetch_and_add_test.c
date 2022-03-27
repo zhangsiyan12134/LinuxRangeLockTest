@@ -43,6 +43,7 @@ int ctfs_lock_list_add_node(off_t start, size_t n, int flag){
     tail = head.fl_next;   //get the head of the lock list
     temp = (ct_fl_t*)malloc(sizeof(ct_fl_t));
     temp->fl_next = NULL;
+    temp->fl_prev = NULL;
     temp->fl_start = start;
     temp->fl_end = start + n - 1;
     //TODO: get locklist here
@@ -56,7 +57,9 @@ int ctfs_lock_list_add_node(off_t start, size_t n, int flag){
         last = tail;
         tail = tail->fl_next;    
     }
+    temp->fl_prev = last;
     last->fl_next = temp;
+
     //TODO: release locklist here
     return 0;
 }
