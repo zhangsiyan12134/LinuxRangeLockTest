@@ -12,6 +12,7 @@
 struct ct_fl_t;
 typedef uint16_t uint16;
 pthread_spinlock_t lock_list_spin;
+pthread_mutex_t lock_list_mutex;
 
 enum mode{O_RDONLY, O_WRONLY, O_RDWR};
 
@@ -146,7 +147,8 @@ ct_fl_t* ctfs_lock_list_add_node(int fd, off_t start, size_t n, int flag){
     temp->fl_end = start + n - 1;
     temp->node_id = temp;
 
-    pthread_spin_lock(&lock_list_spin);
+    //pthread_spin_lock(&lock_list_spin);
+    pthread_mutex_lock(&lock_list_mutex);
 
     if(head != NULL){
         tail = head;   //get the head of the lock list
@@ -167,7 +169,9 @@ ct_fl_t* ctfs_lock_list_add_node(int fd, off_t start, size_t n, int flag){
         head = temp;
     }
     printf("Node %p added, Range: %u - %u, mode: %s\n", temp, temp->fl_start, temp->fl_end, enum_to_string(temp->fl_type));
-    pthread_spin_unlock(&lock_list_spin);
+   
+    pthread_mutex_unlock(&lock_list_mutex);
+    //pthread_spin_unlock(&lock_list_spin);
 
     return temp;
 }
@@ -177,7 +181,8 @@ void ctfs_lock_list_remove_node(ct_fl_t *node){
     assert(node != NULL);
     ct_fl_t *prev, *next;
 
-    pthread_spin_lock(&lock_list_spin);
+    //pthread_spin_lock(&lock_list_spin);
+    pthread_mutex_lock(&lock_list_mutex);
     prev = node->fl_prev;
     next = node->fl_next;
     if (prev == NULL){
@@ -192,10 +197,11 @@ void ctfs_lock_list_remove_node(ct_fl_t *node){
         if (next != NULL)
             next->fl_prev = prev;
     }
-
     ctfs_lock_remove_blocking(node);
     printf("Node %p removed, Range: %u - %u, mode: %s\n", node, node->fl_start, node->fl_end, enum_to_string(node->fl_type));
-    pthread_spin_unlock(&lock_list_spin);
+
+    pthread_mutex_unlock(&lock_list_mutex);
+    //pthread_spin_unlock(&lock_list_spin);
 
     free(node);
 }
@@ -203,7 +209,9 @@ void ctfs_lock_list_remove_node(ct_fl_t *node){
 void print_all_info(){
     ct_fl_t *temp1;
     ct_fl_seg *temp2;
-    pthread_spin_lock(&lock_list_spin);
+
+    //pthread_spin_lock(&lock_list_spin);
+    pthread_mutex_lock(&lock_list_mutex);
     temp1 = head;
     printf("*********************** Final List ***********************\n");
     while(temp1 != NULL){
@@ -224,16 +232,20 @@ void print_all_info(){
         temp1 = temp1->fl_next;
     }
     printf("**********************************************************\n");
-    pthread_spin_unlock(&lock_list_spin);
+
+    pthread_mutex_unlock(&lock_list_mutex);
+    //pthread_spin_unlock(&lock_list_spin);
 }
 
 void* request_simulation(void *en_delete){
     ct_fl_t *node1;
     int flag = *((int *) en_delete);
+
     static uint16 seeds[3] = { 182, 757, 21 };
     off_t start = nrand48(seeds) % (100 + 1);
     size_t size = nrand48(seeds) % (50 + 1 - 1) + 1;
     int rw_mode= nrand48(seeds) % (2 + 1);
+
     node1 = ctfs_lock_list_add_node(10086, start, 20, rw_mode);
     if(flag){
         while(node1->fl_block != NULL){} //wait for blocker finshed
@@ -245,10 +257,10 @@ void* request_simulation(void *en_delete){
 
 
 int main(int argc, char *argv[]) {
-    //************settings**************
+    //********************settings**********************
     static int nthread = 64; //number of threads
     static int en_delete = TRUE; //enable the node deletion?
-    //***********************************
+    //**************************************************
     if( argc == 3 ) {
       nthread = atoi(argv[1]);
       en_delete = atoi(argv[2]);
