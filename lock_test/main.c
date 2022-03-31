@@ -8,7 +8,7 @@
 #define list_entry(ptr, type, member) container_of(ptr, type, member)
 
 struct ct_fl_t;
-
+typedef uint16_t uint16;
 pthread_spinlock_t lock_list_spin;
 
 enum mode{O_RDONLY, O_WRONLY, O_RDWR};
@@ -210,69 +210,33 @@ void print_all_info(){
     pthread_spin_unlock(&lock_list_spin);
 }
 
-void* request_sim1(){
+void* request_simulation(){
     ct_fl_t *node1;
-    node1 = ctfs_lock_list_add_node(10086, 5, 20, O_RDONLY);
+    static uint16 seeds[3] = { 182, 757, 21 };
+    off_t start = nrand48(seeds) % (100 + 1);
+    size_t size = nrand48(seeds) % (50 + 1 - 1) + 1;
+    int rw_mode= nrand48(seeds) % (2 + 1);
+    node1 = ctfs_lock_list_add_node(10086, start, 20, rw_mode);
     while(node1->fl_block != NULL){} //wait for blocker finshed
-    sleep(0.25);
+    sleep(size / 100);
     ctfs_lock_list_remove_node(node1);
     pthread_exit(NULL);
 }
 
-void* request_sim2(){
-    ct_fl_t *node2;
-    node2 = ctfs_lock_list_add_node(10086, 0, 5, O_RDWR);
-    while(node2->fl_block != NULL){} //wait for blocker finshed
-    sleep(0.05);
-    ctfs_lock_list_remove_node(node2);
-    pthread_exit(NULL);
-}
-
-void* request_sim3(){
-    ct_fl_t *node3;
-    node3 = ctfs_lock_list_add_node(10086, 0, 10, O_RDWR); // mode conflicted with node1&2
-    while(node3->fl_block != NULL){} //wait for blocker finshed
-    sleep(0.1);
-    ctfs_lock_list_remove_node(node3);
-    pthread_exit(NULL);
-}
-
-void* request_sim4(){
-    ct_fl_t *node4;
-    node4 = ctfs_lock_list_add_node(10086, 30, 10, O_WRONLY);
-    while(node4->fl_block != NULL){} //wait for blocker finshed
-    sleep(0.1);
-    ctfs_lock_list_remove_node(node4);
-    pthread_exit(NULL);
-}
-
-void* request_sim5(){
-    ct_fl_t *node5;
-    node5 = ctfs_lock_list_add_node(10086, 20, 20, O_WRONLY);
-    while(node5->fl_block != NULL){} //wait for blocker finshed
-    sleep(0.2);
-    ctfs_lock_list_remove_node(node5);
-    pthread_exit(NULL);
-}
 
 int main(void) {
-    //ct_fl_t *node4, *node3, *node2, *node1;
-
+    static int nthread = 64;
+    unsigned int seed = 18;
     pthread_spin_init(&lock_list_spin, 0);
+    pthread_t threads[nthread];
 
-    pthread_t thread1, thread2, thread3, thread4, thread5;
+    for(int i = 0; i < nthread; i++){
+        pthread_create(&threads[i], NULL, request_simulation, NULL);
+    }
 
-    pthread_create(&thread1, NULL, request_sim1, NULL);
-    pthread_create(&thread2, NULL, request_sim2, NULL);
-    pthread_create(&thread3, NULL, request_sim3, NULL);
-    pthread_create(&thread4, NULL, request_sim4, NULL);
-    pthread_create(&thread5, NULL, request_sim5, NULL);
-
-    pthread_join(thread1, NULL);
-    pthread_join(thread2, NULL);
-    pthread_join(thread3, NULL);
-    pthread_join(thread4, NULL);
-    pthread_join(thread5, NULL);
+    for(int i = 0; i < nthread; i++){
+        pthread_join(threads[i], NULL);
+    }
 
     print_all_info();
 
