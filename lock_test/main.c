@@ -92,7 +92,9 @@ void ctfs_lock_remove_blocking(ct_fl_t *current){
         temp1 = temp->addr->fl_block;
         while(temp1 != NULL){   //go thorough the blocking list on other nodes to find itself
             //compare range and mode
-            if((temp1->addr->fl_start == current->fl_start) && (temp1->addr->fl_end == current->fl_end) && (temp1->addr->fl_type == current->fl_type)){
+            //if((temp1->addr->fl_start == current->fl_start) && (temp1->addr->fl_end == current->fl_end) && (temp1->addr->fl_type == current->fl_type)){
+            //or simply compares the address
+            if(temp1->addr == current){
                 prev = temp1->prev;
                 next = temp1->next;
                 if(prev != NULL)
@@ -242,11 +244,19 @@ void* request_simulation(void *en_delete){
 }
 
 
-int main(void) {
+int main(int argc, char *argv[]) {
     //************settings**************
     static int nthread = 64; //number of threads
     static int en_delete = TRUE; //enable the node deletion?
     //***********************************
+    if( argc == 3 ) {
+      nthread = atoi(argv[1]);
+      en_delete = atoi(argv[2]);
+   } else {
+       printf("Plese use the following format\n");
+       printf("lock_test #threads [0|1]\n");
+   }
+
     pthread_spin_init(&lock_list_spin, 0);
     pthread_t threads[nthread];
     printf("********************** Transactions **********************\n");
