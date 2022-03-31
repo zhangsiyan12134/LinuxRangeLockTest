@@ -6,6 +6,8 @@
 #include <pthread.h>
 
 #define list_entry(ptr, type, member) container_of(ptr, type, member)
+#define TRUE 1
+#define FALSE 0
 
 struct ct_fl_t;
 typedef uint16_t uint16;
@@ -40,6 +42,19 @@ struct ct_fl_t {
 typedef struct ct_fl_t ct_fl_t;
 
 ct_fl_t* head;
+
+char* enum_to_string(int mode){
+    switch(mode){
+        case O_RDONLY:
+            return "O_RDONLY";
+        case O_WRONLY:
+            return "O_WRONLY";
+        case O_RDWR:
+            return "O_RDWR";
+        default:
+            return "UNKNOWN";
+    }
+}
 
 void ctfs_lock_add_blocking(ct_fl_t *current, ct_fl_t *node){
     /* add the conflicted node into the head of the blocking list of the current node*/
@@ -149,7 +164,7 @@ ct_fl_t* ctfs_lock_list_add_node(int fd, off_t start, size_t n, int flag){
     } else {
         head = temp;
     }
-    printf("Node %p added, Range: %u - %u, mode: %d\n", temp, temp->fl_start, temp->fl_end, temp->fl_type);
+    printf("Node %p added, Range: %u - %u, mode: %s\n", temp, temp->fl_start, temp->fl_end, enum_to_string(temp->fl_type));
     pthread_spin_unlock(&lock_list_spin);
 
     return temp;
@@ -177,7 +192,7 @@ void ctfs_lock_list_remove_node(ct_fl_t *node){
     }
 
     ctfs_lock_remove_blocking(node);
-    printf("Node %p removed, Range: %u - %u, mode: %d\n", node, node->fl_start, node->fl_end, node->fl_type);
+    printf("Node %p removed, Range: %u - %u, mode: %s\n", node, node->fl_start, node->fl_end, enum_to_string(node->fl_type));
     pthread_spin_unlock(&lock_list_spin);
 
     free(node);
@@ -188,19 +203,19 @@ void print_all_info(){
     ct_fl_seg *temp2;
     pthread_spin_lock(&lock_list_spin);
     temp1 = head;
-    printf("***********************Current List***********************\n");
+    printf("*********************** Final List ***********************\n");
     while(temp1 != NULL){
-        printf("Node: %p, Range: %u - %u, mode: %d ===>\n", temp1->node_id, temp1->fl_start, temp1->fl_end, temp1->fl_type);
+        printf("Node: %p, Range: %u - %u, mode: %s ===>\n", temp1->node_id, temp1->fl_start, temp1->fl_end, enum_to_string(temp1->fl_type));
 
         temp2 = temp1->fl_wait;
         while(temp2 != NULL){
-            printf("\tWaiting by: Node %p, Range: %u - %u, mode: %d\n", temp2->addr->node_id, temp2->addr->fl_start, temp2->addr->fl_end, temp2->addr->fl_type);
+            printf("\tWaiting by: Node %p, Range: %u - %u, mode: %s\n", temp2->addr->node_id, temp2->addr->fl_start, temp2->addr->fl_end, enum_to_string(temp2->addr->fl_type));
             temp2 = temp2->next;
         }
 
         temp2 = temp1->fl_block;
         while(temp2 != NULL){
-            printf("\tBlocked by: Node %p, Range: %u - %u, mode: %d\n", temp2->addr->node_id, temp2->addr->fl_start, temp2->addr->fl_end, temp2->addr->fl_type);
+            printf("\tBlocked by: Node %p, Range: %u - %u, mode: %s\n", temp2->addr->node_id, temp2->addr->fl_start, temp2->addr->fl_end, enum_to_string(temp2->addr->fl_type));
             temp2 = temp2->next;
         }
         printf("\n");
@@ -210,28 +225,33 @@ void print_all_info(){
     pthread_spin_unlock(&lock_list_spin);
 }
 
-void* request_simulation(){
+void* request_simulation(void *en_delete){
     ct_fl_t *node1;
+    int flag = *((int *) en_delete);
     static uint16 seeds[3] = { 182, 757, 21 };
     off_t start = nrand48(seeds) % (100 + 1);
     size_t size = nrand48(seeds) % (50 + 1 - 1) + 1;
     int rw_mode= nrand48(seeds) % (2 + 1);
     node1 = ctfs_lock_list_add_node(10086, start, 20, rw_mode);
-    while(node1->fl_block != NULL){} //wait for blocker finshed
-    sleep(size / 100);
-    ctfs_lock_list_remove_node(node1);
+    if(flag){
+        while(node1->fl_block != NULL){} //wait for blocker finshed
+        sleep(size / 100);
+        ctfs_lock_list_remove_node(node1);
+    }
     pthread_exit(NULL);
 }
 
 
 int main(void) {
-    static int nthread = 64;
-    unsigned int seed = 18;
+    //************settings**************
+    static int nthread = 16; //number of threads
+    static int en_delete = FALSE; //enable the node deletion?
+    //***********************************
     pthread_spin_init(&lock_list_spin, 0);
     pthread_t threads[nthread];
-
+    printf("********************** Transactions **********************\n");
     for(int i = 0; i < nthread; i++){
-        pthread_create(&threads[i], NULL, request_simulation, NULL);
+        pthread_create(&threads[i], NULL, request_simulation, &en_delete);
     }
 
     for(int i = 0; i < nthread; i++){
