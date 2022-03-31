@@ -3,3 +3,4 @@
 *.cbp
 *.depend
 lock_test/bin/Debug/lock_test
+*.layout

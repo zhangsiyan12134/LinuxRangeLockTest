@@ -235,7 +235,7 @@ void* request_simulation(void *en_delete){
     node1 = ctfs_lock_list_add_node(10086, start, 20, rw_mode);
     if(flag){
         while(node1->fl_block != NULL){} //wait for blocker finshed
-        sleep(size / 100);
+        sleep(size / 100);  //simulate the reading latency(1/100 of the size)
         ctfs_lock_list_remove_node(node1);
     }
     pthread_exit(NULL);
@@ -244,8 +244,8 @@ void* request_simulation(void *en_delete){
 
 int main(void) {
     //************settings**************
-    static int nthread = 16; //number of threads
-    static int en_delete = FALSE; //enable the node deletion?
+    static int nthread = 64; //number of threads
+    static int en_delete = TRUE; //enable the node deletion?
     //***********************************
     pthread_spin_init(&lock_list_spin, 0);
     pthread_t threads[nthread];
