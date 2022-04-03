@@ -117,7 +117,7 @@ void *rnd_write_test(void *vargp){
 
 int main(int argc, char ** argv){
 	if(argc != 5){
-		printf("usage: path_to_folder num_thread size round\n");
+		printf("usage: path_to_folder num_thread size round op\n");
 		return -1;
 	}
 	uint64_t total_bytes = 0, real_time;
