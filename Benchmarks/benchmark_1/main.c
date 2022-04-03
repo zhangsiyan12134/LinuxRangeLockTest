@@ -68,9 +68,11 @@ void *seq_write_test(void *vargp){
     long long portion = conf->size / conf->tnum;
     long long start_addr = conf->tid * portion;
 
+    printf("Thread %d created, write range is: %lld - %lld\n", conf->tid, start_addr, start_addr + portion);
     for(uint64_t i = 0; i < conf->round; i++){
         ret += PWRITE(conf->fd, conf->buffer, portion, start_addr);
     }
+    printf("Thread %d write %lu Bytes\n", conf->tid, ret);
 
     pthread_exit(NULL);
 }
@@ -80,25 +82,19 @@ void *seq_read_test(void *vargp){
     uint64_t ret = 0;
     long long portion = conf->size / conf->tnum;
     long long start_addr = conf->tid * portion;
-
+    printf("Thread %d created, read range is: %lld - %lld\n", conf->tid, start_addr, start_addr + portion);
     for(uint64_t i = 0; i < conf->round; i++){
         ret += PREAD(conf->fd, conf->buffer, portion, start_addr);
     }
-
+    printf("Thread %d read %lu Bytes\n", conf->tid, ret);
     pthread_exit(NULL);
 }
 
 
 void *rnd_read_test(void *vargp){
     config *conf = (config*) vargp;
-    static uint16_t seeds[3] = { 182, 757, 21 };
-    int loop = 0;
-
-    while(loop != conf->round){
-        //generate random number between 0 to conf->size - conf->blk_size
-        uint64_t start = nrand48(seeds) % (conf->size - conf->blk_size + 1);
-        PREAD(conf->fd, conf->buffer, conf->blk_size, start);
-        loop++;
+    for(int i = 0; i < conf->round; i++){
+        PREAD(conf->fd, conf->buffer, conf->blk_size, conf->rnd_addrs[i]);
     }
 
     pthread_exit(NULL);
@@ -192,11 +188,11 @@ int main(int argc, char ** argv){
     //close file here for writeback delay
     CLOSE(fd);
     clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
-    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop) / round;
-    total_bytes = size;
+    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
+    total_bytes = size * round;
     printf("Sequential Write Test Completed: \n");
-    printf("\tAverage Time Used: %lu ns\n", real_time);
-    printf("\tTotal Byte Write: %lu bytes\n", total_bytes);
+    printf("\tTotal Time Used: %lu ns\n", real_time);
+    printf("\tTotal Byte Write in %d rounds: %lu bytes\n", round, total_bytes);
     printf("\tAverage Write Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
     printf("\n");
 
@@ -225,11 +221,11 @@ int main(int argc, char ** argv){
     //close file here for writeback time
     CLOSE(fd);
     clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
-    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop) / round;
-    total_bytes = size;
+    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
+    total_bytes = size * round;
     printf("Sequential Read Test Completed: \n");
-    printf("\tAverage Time Used: %lu ns\n", real_time);
-    printf("\tTotal Byte Read: %lu bytes\n", total_bytes);
+    printf("\tTotal Time Used: %lu ns\n", real_time);
+    printf("\tTotal Byte Read in %d rounds: %lu bytes\n", round, total_bytes);
     printf("\tAverage Read Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
 
     for(uint64_t i = 0; i < (size / sizeof(char)); i++)
@@ -269,11 +265,11 @@ int main(int argc, char ** argv){
     //close file here for writeback time
     CLOSE(fd);
     clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
-    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop) / round;
-    total_bytes = rnd_blk_size * round;
-    printf("Random Read Test Completed: \n");
-    printf("\tAverage Time Used: %lu ns\n", real_time);
-    printf("\tTotal Byte Read: %lu bytes\n", total_bytes);
+    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
+    total_bytes = rnd_blk_size * round * num_thread;
+    printf("Random Read Test Completed with %d Bytes Block: \n", rnd_blk_size);
+    printf("\tTotal Time Used: %lu ns\n", real_time);
+    printf("\tTotal Byte Read in %d rounds: %lu bytes\n", round, total_bytes);
     printf("\tAverage Read Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
     printf("\n");
 
@@ -305,11 +301,11 @@ int main(int argc, char ** argv){
     //close file here for writeback time
     CLOSE(fd);
     clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
-    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop) / round;
-    total_bytes = rnd_blk_size * round;
-    printf("Random Write Test Completed: \n");
-    printf("\tAverage Time Used: %lu ns\n", real_time);
-    printf("\tTotal Byte Write: %lu bytes\n", total_bytes);
+    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
+    total_bytes = rnd_blk_size * round * num_thread;
+    printf("Random Write Test Completed with %d Bytes Block: \n", rnd_blk_size);
+    printf("\tTotal Time Used: %lu ns\n", real_time);
+    printf("\tTotal Byte Write in %d rounds: %lu bytes\n", round, total_bytes);
     printf("\tAverage Write Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
 
     fd = OPEN(path, O_WRONLY | O_SYNC, S_IRWXU);
