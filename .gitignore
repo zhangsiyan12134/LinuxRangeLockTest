@@ -5,3 +5,6 @@
 lock_test/bin/Debug/lock_test
 *.layout
 lock_test/lock_test
+Benchmarks/benchmark_1/test
+Benchmarks/benchmark_1/bin/Debug/benchmark_1
+lock_test/bin/Release/lock_test

@@ -158,7 +158,7 @@ ct_fl_t* ctfs_lock_list_add_node(int fd, off_t start, size_t n, int flag){
                 ctfs_lock_add_blocking(temp, tail); //add the conflicted lock into blocking list
                 printf("\tNode %p is blocking the Node %p\n", tail, temp);
                 ctfs_lock_add_waiting(temp, tail); //add the new node to the waiting list of the conflicted node
-                printf("\tNode %p is waiting the Node %p\n", tail, temp);
+                printf("\tNode %p is waiting the Node %p\n", temp, tail);
             }
             last = tail;
             tail = tail->fl_next;
@@ -169,7 +169,7 @@ ct_fl_t* ctfs_lock_list_add_node(int fd, off_t start, size_t n, int flag){
         head = temp;
     }
     printf("Node %p added, Range: %u - %u, mode: %s\n", temp, temp->fl_start, temp->fl_end, enum_to_string(temp->fl_type));
-   
+
     pthread_mutex_unlock(&lock_list_mutex);
     //pthread_spin_unlock(&lock_list_spin);
 
@@ -237,7 +237,7 @@ void print_all_info(){
     //pthread_spin_unlock(&lock_list_spin);
 }
 
-void* request_simulation(void *en_delete){
+void* __attribute__((optimize("O0"))) request_simulation(void *en_delete){
     ct_fl_t *node1;
     int flag = *((int *) en_delete);
 
