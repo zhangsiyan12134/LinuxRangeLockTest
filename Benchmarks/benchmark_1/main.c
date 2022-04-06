@@ -65,48 +65,92 @@ enum test_mode{
 void *seq_write_test(void *vargp){
     config *conf = (config*) vargp;
     uint64_t ret = 0;
+    struct timespec stopwatch_start;
+	struct timespec stopwatch_stop;
     long long portion = conf->size / conf->tnum;
     long long start_addr = conf->tid * portion;
 
     printf("Thread %d created, write range is: %lld - %lld\n", conf->tid, start_addr, start_addr + portion);
+
+    clock_gettime(CLOCK_MONOTONIC, &stopwatch_start);
     for(uint64_t i = 0; i < conf->round; i++){
         ret += PWRITE(conf->fd, conf->buffer, portion, start_addr);
     }
-    printf("Thread %d write %lu Bytes\n", conf->tid, ret);
+    clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
 
+    conf->total_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
+    conf->total_bytes = ret;
+    printf("Thread %d write %lu Bytes in %lu ns.\n", conf->tid, ret, conf->total_time);
     pthread_exit(NULL);
 }
 
 void *seq_read_test(void *vargp){
     config *conf = (config*) vargp;
     uint64_t ret = 0;
+    struct timespec stopwatch_start;
+	struct timespec stopwatch_stop;
     long long portion = conf->size / conf->tnum;
     long long start_addr = conf->tid * portion;
+
     printf("Thread %d created, read range is: %lld - %lld\n", conf->tid, start_addr, start_addr + portion);
+
+    clock_gettime(CLOCK_MONOTONIC, &stopwatch_start);
     for(uint64_t i = 0; i < conf->round; i++){
         ret += PREAD(conf->fd, conf->buffer, portion, start_addr);
     }
-    printf("Thread %d read %lu Bytes\n", conf->tid, ret);
+    clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
+
+    conf->total_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
+    conf->total_bytes = ret;
+    printf("Thread %d read %lu Bytes in %lu ns.\n", conf->tid, ret, conf->total_time);
     pthread_exit(NULL);
 }
 
 
 void *rnd_read_test(void *vargp){
     config *conf = (config*) vargp;
+    uint64_t ret = 0;
+    struct timespec stopwatch_start;
+	struct timespec stopwatch_stop;
+
+    printf("Thread %d created, read range is: \n", conf->tid);
     for(int i = 0; i < conf->round; i++){
-        PREAD(conf->fd, conf->buffer, conf->blk_size, conf->rnd_addrs[i]);
+        printf("\t%lld - %lld\n", conf->rnd_addrs[i], conf->rnd_addrs[i] + conf->blk_size);
     }
 
+    clock_gettime(CLOCK_MONOTONIC, &stopwatch_start);
+    for(int i = 0; i < conf->round; i++){
+        ret += PREAD(conf->fd, conf->buffer, conf->blk_size, conf->rnd_addrs[i]);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
+
+    conf->total_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
+    conf->total_bytes = ret;
+    printf("Thread %d read %lu Bytes in %lu ns.\n", conf->tid, ret, conf->total_time);
     pthread_exit(NULL);
 }
 
 void *rnd_write_test(void *vargp){
     config *conf = (config*) vargp;
+    uint64_t ret = 0;
+    struct timespec stopwatch_start;
+	struct timespec stopwatch_stop;
+
+	printf("Thread %d created, write range is: \n", conf->tid);
     for(int i = 0; i < conf->round; i++){
-        //write 1s to the pre-determined addresses
-        PWRITE(conf->fd, conf->rnd_buf, conf->blk_size, conf->rnd_addrs[i]);
+        printf("\t%lld - %lld\n", conf->rnd_addrs[i], conf->rnd_addrs[i] + conf->blk_size);
     }
 
+    clock_gettime(CLOCK_MONOTONIC, &stopwatch_start);
+    for(int i = 0; i < conf->round; i++){
+        //write 1s to the pre-determined addresses
+        ret += PWRITE(conf->fd, conf->rnd_buf, conf->blk_size, conf->rnd_addrs[i]);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
+
+    conf->total_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
+    conf->total_bytes = ret;
+    printf("Thread %d write %lu Bytes in %lu ns.\n", conf->tid, ret, conf->total_time);
     pthread_exit(NULL);
 }
 
@@ -117,8 +161,6 @@ int main(int argc, char ** argv){
 		return -1;
 	}
 	uint64_t total_bytes = 0, real_time;
-    struct timespec stopwatch_start;
-	struct timespec stopwatch_stop;
 	int fd;
     char *buffer;       //the data source for seq tests
     char *rnd_buf;      //the data source for rnd tests
@@ -169,7 +211,8 @@ int main(int argc, char ** argv){
     *************************************************************************/
     printf("Starting %d thread(s) SEQ Write Test\n", num_thread);
     printf("*************************************************************************\n");
-    clock_gettime(CLOCK_MONOTONIC, &stopwatch_start);
+    real_time = 0;
+    total_bytes = 0;
     fd = OPEN (path, O_WRONLY | O_CREAT | O_SYNC, S_IRWXU);
     for(int i = 0; i < num_thread; i++){
         conf[i].fd = fd;
@@ -178,18 +221,21 @@ int main(int argc, char ** argv){
         conf[i].tnum = num_thread;
         conf[i].size = size;
         conf[i].buffer = buffer;
+        conf[i].total_bytes = 0;
+        conf[i].total_time = 0;
         pthread_create(&threads[i], NULL, seq_write_test, (void*)&conf[i]);
     }
 
     for(int i = 0; i < num_thread; i++)
     {
         pthread_join(threads[i], NULL);
+        real_time += conf[i].total_time;
+        total_bytes += conf[i].total_bytes;
     }
-    //close file here for writeback delay
+    //close file here to clear the buffer
     CLOSE(fd);
-    clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
-    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
-    total_bytes = size * round;
+
+    real_time = real_time / num_thread;
     printf("Sequential Write Test Completed: \n");
     printf("\tTotal Time Used: %lu ns\n", real_time);
     printf("\tTotal Byte Write in %d rounds: %lu bytes\n", round, total_bytes);
@@ -202,7 +248,8 @@ int main(int argc, char ** argv){
     *************************************************************************/
     printf("Starting %d thread(s) SEQ Read Test\n", num_thread);
     printf("*************************************************************************\n");
-    clock_gettime(CLOCK_MONOTONIC, &stopwatch_start);
+    real_time = 0;
+    total_bytes = 0;
     fd = OPEN(path, O_RDONLY | O_SYNC, S_IRWXU);
     for(int i = 0; i < num_thread; i++){
         conf[i].fd = fd;
@@ -211,18 +258,21 @@ int main(int argc, char ** argv){
         conf[i].tnum = num_thread;
         conf[i].size = size;
         conf[i].buffer = buffer;
+        conf[i].total_bytes = 0;
+        conf[i].total_time = 0;
         pthread_create(&threads[i], NULL, seq_read_test, (void*)&conf[i]);
     }
 
     for(int i = 0; i < num_thread; i++)
     {
         pthread_join(threads[i], NULL);
+        real_time += conf[i].total_time;
+        total_bytes += conf[i].total_bytes;
     }
     //close file here for writeback time
     CLOSE(fd);
-    clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
-    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
-    total_bytes = size * round;
+
+    real_time = real_time / num_thread;
     printf("Sequential Read Test Completed: \n");
     printf("\tTotal Time Used: %lu ns\n", real_time);
     printf("\tTotal Byte Read in %d rounds: %lu bytes\n", round, total_bytes);
@@ -243,7 +293,8 @@ int main(int argc, char ** argv){
     *************************************************************************/
     printf("Starting %d thread(s) RND Read Test\n", num_thread);
     printf("*************************************************************************\n");
-    clock_gettime(CLOCK_MONOTONIC, &stopwatch_start);
+    real_time = 0;
+    total_bytes = 0;
     fd = OPEN(path, O_RDONLY | O_SYNC, S_IRWXU);
     for(int i = 0; i < num_thread; i++){
         conf[i].fd = fd;
@@ -253,6 +304,8 @@ int main(int argc, char ** argv){
         conf[i].size = size;
         conf[i].blk_size = rnd_blk_size;
         conf[i].buffer = buffer;
+        conf[i].total_bytes = 0;
+        conf[i].total_time = 0;
         conf[i].rnd_addrs = rnd_addrs;
         conf[i].rnd_buf = rnd_buf;
         pthread_create(&threads[i], NULL, rnd_read_test, (void*)&conf[i]);
@@ -261,12 +314,13 @@ int main(int argc, char ** argv){
     for(int i = 0; i < num_thread; i++)
     {
         pthread_join(threads[i], NULL);
+        real_time += conf[i].total_time;
+        total_bytes += conf[i].total_bytes;
     }
     //close file here for writeback time
     CLOSE(fd);
-    clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
-    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
-    total_bytes = rnd_blk_size * round * num_thread;
+
+    real_time = real_time / num_thread;
     printf("Random Read Test Completed with %d Bytes Block: \n", rnd_blk_size);
     printf("\tTotal Time Used: %lu ns\n", real_time);
     printf("\tTotal Byte Read in %d rounds: %lu bytes\n", round, total_bytes);
@@ -279,7 +333,8 @@ int main(int argc, char ** argv){
     *************************************************************************/
     printf("Starting %d thread(s) RND Write Test\n", num_thread);
     printf("*************************************************************************\n");
-    clock_gettime(CLOCK_MONOTONIC, &stopwatch_start);
+    real_time = 0;
+    total_bytes = 0;
     fd = OPEN(path, O_WRONLY | O_SYNC, S_IRWXU);
     for(int i = 0; i < num_thread; i++){
         conf[i].fd = fd;
@@ -289,6 +344,8 @@ int main(int argc, char ** argv){
         conf[i].size = size;
         conf[i].blk_size = rnd_blk_size;
         conf[i].buffer = buffer;
+        conf[i].total_bytes = 0;
+        conf[i].total_time = 0;
         conf[i].rnd_addrs = rnd_addrs;
         conf[i].rnd_buf = rnd_buf;
         pthread_create(&threads[i], NULL, rnd_write_test, (void*)&conf[i]);
@@ -297,12 +354,13 @@ int main(int argc, char ** argv){
     for(int i = 0; i < num_thread; i++)
     {
         pthread_join(threads[i], NULL);
+        real_time += conf[i].total_time;
+        total_bytes += conf[i].total_bytes;
     }
     //close file here for writeback time
     CLOSE(fd);
-    clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
-    real_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
-    total_bytes = rnd_blk_size * round * num_thread;
+
+    real_time = real_time / num_thread;
     printf("Random Write Test Completed with %d Bytes Block: \n", rnd_blk_size);
     printf("\tTotal Time Used: %lu ns\n", real_time);
     printf("\tTotal Byte Write in %d rounds: %lu bytes\n", round, total_bytes);
