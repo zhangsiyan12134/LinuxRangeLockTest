@@ -106,6 +106,35 @@ void *seq_read_test(void *vargp){
     pthread_exit(NULL);
 }
 
+void *rnd_write_test(void *vargp){
+    config *conf = (config*) vargp;
+    uint64_t ret = 0;
+    int tid = conf->tid;
+    char *rnd_buf;      //the data source for rnd tests
+    struct timespec stopwatch_start;
+	struct timespec stopwatch_stop;
+
+	rnd_buf = malloc(conf->blk_size);
+	//generate the random write test data
+    for(uint64_t i = 0; i < (conf->blk_size / sizeof(char)); i++){
+            rnd_buf[i] = conf->tid; //any region that write by this thread will be replaced with its thread ID
+    }
+
+	printf("Thread %d created, write range is: \n", conf->tid);
+    printf("\t%lld - %lld\n", conf->rnd_addrs[tid], conf->rnd_addrs[tid] + conf->blk_size);
+
+    clock_gettime(CLOCK_MONOTONIC, &stopwatch_start);
+    for(int i = 0; i < conf->round; i++){
+        //write 1s to the pre-determined addresses
+        ret += PWRITE(conf->fd, rnd_buf, conf->blk_size, conf->rnd_addrs[tid]);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
+
+    conf->total_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
+    conf->total_bytes = ret;
+    printf("Thread %d write %lu Bytes in %lu ns.\n", conf->tid, ret, conf->total_time);
+    pthread_exit(NULL);
+}
 
 void *rnd_read_test(void *vargp){
     config *conf = (config*) vargp;
@@ -130,31 +159,6 @@ void *rnd_read_test(void *vargp){
     pthread_exit(NULL);
 }
 
-void *rnd_write_test(void *vargp){
-    config *conf = (config*) vargp;
-    uint64_t ret = 0;
-    struct timespec stopwatch_start;
-	struct timespec stopwatch_stop;
-
-	printf("Thread %d created, write range is: \n", conf->tid);
-    for(int i = 0; i < conf->round; i++){
-        printf("\t%lld - %lld\n", conf->rnd_addrs[i], conf->rnd_addrs[i] + conf->blk_size);
-    }
-
-    clock_gettime(CLOCK_MONOTONIC, &stopwatch_start);
-    for(int i = 0; i < conf->round; i++){
-        //write 1s to the pre-determined addresses
-        ret += PWRITE(conf->fd, conf->rnd_buf, conf->blk_size, conf->rnd_addrs[i]);
-    }
-    clock_gettime(CLOCK_MONOTONIC, &stopwatch_stop);
-
-    conf->total_time = (uint64_t)calc_diff(stopwatch_start, stopwatch_stop);
-    conf->total_bytes = ret;
-    printf("Thread %d write %lu Bytes in %lu ns.\n", conf->tid, ret, conf->total_time);
-    pthread_exit(NULL);
-}
-
-
 int main(int argc, char ** argv){
 	if(argc != 5){
 		printf("usage: path_to_folder num_thread size round\n");
@@ -163,7 +167,7 @@ int main(int argc, char ** argv){
 	uint64_t total_bytes = 0, real_time;
 	int fd;
     char *buffer;       //the data source for seq tests
-    char *rnd_buf;      //the data source for rnd tests
+    char *rnd_buf;
 	char *path = argv[1];
 	int num_thread = atoi(argv[2]);
 	long long size = atoll(argv[3]);
@@ -189,13 +193,9 @@ int main(int argc, char ** argv){
             buffer[i] = i % 256;    //hash function for later data consistance check
         }
     }
-    rnd_buf = malloc(rnd_blk_size);
-    for(uint64_t i = 0; i < (rnd_blk_size / sizeof(char)); i++){
-            rnd_buf[i] = 255;     //any area that wrote by rnd test will be 1 filled
-    }
     //preparing the random test address list
-    rnd_addrs = malloc(sizeof(long long) * round);
-    for(int i = 0; i < round; i++){
+    rnd_addrs = malloc(sizeof(long long) * num_thread);
+    for(int i = 0; i < num_thread; i++){
         rnd_addrs[i] = nrand48(seeds) % (size - rnd_blk_size + 1);
         printf("%09x\n", rnd_addrs[i]);
     }
@@ -289,6 +289,60 @@ int main(int argc, char ** argv){
 
 
     /*************************************************************************
+    * beginning of the single file multi-thread random write test.
+    *************************************************************************/
+    printf("Starting %d thread(s) RND Write Test\n", num_thread);
+    printf("*************************************************************************\n");
+    real_time = 0;
+    total_bytes = 0;
+    fd = OPEN(path, O_WRONLY | O_SYNC, S_IRWXU);
+    for(int i = 0; i < num_thread; i++){
+        conf[i].fd = fd;
+        conf[i].tid = i;
+        conf[i].round = round;
+        conf[i].tnum = num_thread;
+        conf[i].size = size;
+        conf[i].blk_size = rnd_blk_size;
+        conf[i].buffer = buffer;
+        conf[i].total_bytes = 0;
+        conf[i].total_time = 0;
+        conf[i].rnd_addrs = rnd_addrs;
+        pthread_create(&threads[i], NULL, rnd_write_test, (void*)&conf[i]);
+    }
+
+    for(int i = 0; i < num_thread; i++)
+    {
+        pthread_join(threads[i], NULL);
+        real_time += conf[i].total_time;
+        total_bytes += conf[i].total_bytes;
+    }
+    //close file here for writeback time
+    CLOSE(fd);
+
+    real_time = real_time / num_thread;
+    printf("Random Write Test Completed with %d Bytes Block: \n", rnd_blk_size);
+    printf("\tTotal Time Used: %lu ns\n", real_time);
+    printf("\tTotal Byte Write in %d rounds: %lu bytes\n", round, total_bytes);
+    printf("\tAverage Write Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
+
+    fd = OPEN(path, O_RDONLY | O_SYNC, S_IRWXU);
+    rnd_buf = malloc(conf->blk_size);
+    for(int i = 0; i < num_thread; i++)
+    {
+        pread(fd, rnd_buf, rnd_blk_size, rnd_addrs[i]);
+        for(uint64_t j = 0; j < (rnd_blk_size / sizeof(char)); j++){
+           if((int)rnd_buf[j] != i){
+                printf("Error: Data varification failed!\n");
+                printf("Expect: %d, but got: %d\n", i, (int)rnd_buf[j]);
+                exit(-1);
+            }
+        }
+    }
+    CLOSE(fd);
+    printf("\n");
+
+
+    /*************************************************************************
     * beginning of the single file multi-thread random read test.
     *************************************************************************/
     printf("Starting %d thread(s) RND Read Test\n", num_thread);
@@ -326,66 +380,6 @@ int main(int argc, char ** argv){
     printf("\tTotal Byte Read in %d rounds: %lu bytes\n", round, total_bytes);
     printf("\tAverage Read Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
     printf("\n");
-
-
-    /*************************************************************************
-    * beginning of the single file multi-thread random write test.
-    *************************************************************************/
-    printf("Starting %d thread(s) RND Write Test\n", num_thread);
-    printf("*************************************************************************\n");
-    real_time = 0;
-    total_bytes = 0;
-    fd = OPEN(path, O_WRONLY | O_SYNC, S_IRWXU);
-    for(int i = 0; i < num_thread; i++){
-        conf[i].fd = fd;
-        conf[i].tid = i;
-        conf[i].round = round;
-        conf[i].tnum = num_thread;
-        conf[i].size = size;
-        conf[i].blk_size = rnd_blk_size;
-        conf[i].buffer = buffer;
-        conf[i].total_bytes = 0;
-        conf[i].total_time = 0;
-        conf[i].rnd_addrs = rnd_addrs;
-        conf[i].rnd_buf = rnd_buf;
-        pthread_create(&threads[i], NULL, rnd_write_test, (void*)&conf[i]);
-    }
-
-    for(int i = 0; i < num_thread; i++)
-    {
-        pthread_join(threads[i], NULL);
-        real_time += conf[i].total_time;
-        total_bytes += conf[i].total_bytes;
-    }
-    //close file here for writeback time
-    CLOSE(fd);
-
-    real_time = real_time / num_thread;
-    printf("Random Write Test Completed with %d Bytes Block: \n", rnd_blk_size);
-    printf("\tTotal Time Used: %lu ns\n", real_time);
-    printf("\tTotal Byte Write in %d rounds: %lu bytes\n", round, total_bytes);
-    printf("\tAverage Write Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
-
-    fd = OPEN(path, O_WRONLY | O_SYNC, S_IRWXU);
-    for(int i = 0; i < round; i++)
-    {
-        pread(fd, rnd_buf, rnd_blk_size, rnd_addrs[i]);
-        for(uint64_t j = 0; j < (rnd_blk_size / sizeof(char)); j++){
-            if((unsigned)rnd_buf[j] != (char)255){
-                printf("Error: Data varification failed!\n");
-                printf("Expect: 255, but got: %i\n", (int)rnd_buf[j]);
-                exit(-1);
-            }
-        }
-    }
-    CLOSE(fd);
-    printf("\n");
-
-
-    /*************************************************************************
-    * beginning of the single file multi-thread random read/write test.
-    *************************************************************************/
-
 
 	return 0;
 }
