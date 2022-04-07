@@ -229,13 +229,12 @@ int main(int argc, char ** argv){
     for(int i = 0; i < num_thread; i++)
     {
         pthread_join(threads[i], NULL);
-        real_time += conf[i].total_time;
+        if(conf[i].total_time > real_time) real_time = conf[i].total_time; //get the time of the last finished thread
         total_bytes += conf[i].total_bytes;
     }
     //close file here to clear the buffer
     CLOSE(fd);
 
-    real_time = real_time / num_thread;
     printf("Sequential Write Test Completed: \n");
     printf("\tTotal Time Used: %lu ns\n", real_time);
     printf("\tTotal Byte Write in %d rounds: %lu bytes\n", round, total_bytes);
@@ -266,13 +265,12 @@ int main(int argc, char ** argv){
     for(int i = 0; i < num_thread; i++)
     {
         pthread_join(threads[i], NULL);
-        real_time += conf[i].total_time;
+        if(conf[i].total_time > real_time) real_time = conf[i].total_time; //get the time of the last finished thread
         total_bytes += conf[i].total_bytes;
     }
     //close file here for writeback time
     CLOSE(fd);
 
-    real_time = real_time / num_thread;
     printf("Sequential Read Test Completed: \n");
     printf("\tTotal Time Used: %lu ns\n", real_time);
     printf("\tTotal Byte Read in %d rounds: %lu bytes\n", round, total_bytes);
@@ -320,9 +318,10 @@ int main(int argc, char ** argv){
     CLOSE(fd);
 
     real_time = real_time / num_thread;
+    total_bytes = total_bytes / num_thread;
     printf("Random Write Test Completed with %d Bytes Block: \n", rnd_blk_size);
-    printf("\tTotal Time Used: %lu ns\n", real_time);
-    printf("\tTotal Byte Write in %d rounds: %lu bytes\n", round, total_bytes);
+    printf("\tAverage Time Used: %lu ns\n", real_time);
+    printf("\tAverage Byte Write in %d rounds: %lu bytes\n", round, total_bytes);
     printf("\tAverage Write Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
 
     fd = OPEN(path, O_RDONLY | O_SYNC, S_IRWXU);
@@ -375,9 +374,10 @@ int main(int argc, char ** argv){
     CLOSE(fd);
 
     real_time = real_time / num_thread;
+    total_bytes = total_bytes / num_thread;
     printf("Random Read Test Completed with %d Bytes Block: \n", rnd_blk_size);
-    printf("\tTotal Time Used: %lu ns\n", real_time);
-    printf("\tTotal Byte Read in %d rounds: %lu bytes\n", round, total_bytes);
+    printf("\tAverage Time Used: %lu ns\n", real_time);
+    printf("\tAverage Byte Read in %d rounds: %lu bytes\n", round, total_bytes);
     printf("\tAverage Read Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
     printf("\n");
 
