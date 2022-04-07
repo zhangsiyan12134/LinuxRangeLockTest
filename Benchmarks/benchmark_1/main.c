@@ -176,6 +176,13 @@ int main(int argc, char ** argv){
     long long *rnd_addrs;
     static uint16_t seeds[3] = { 182, 757, 21 };
 
+    printf("Pid: %ld\n", (long)getppid());
+    printf("Hit enter to continue...\n");
+    char enter = 0;
+    while(enter != '\n'){
+        enter = getchar();
+    }
+
 	if(size % 1024 != 0){
         printf("Error: Size must be a multiple of 1024");
         exit(-1);
