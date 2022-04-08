@@ -98,6 +98,26 @@ void *seq_read_test(void *vargp){
     pthread_exit(NULL);
 }
 
+void *rnd_read_test(void *vargp){
+    config *conf = (config*) vargp;
+    int tid = conf->tid;
+    uint64_t ret = 0;
+
+    printf("Thread %d created, read range is: \n", tid);
+    printf("\t%lld - %lld\n", conf->rnd_addrs[tid], conf->rnd_addrs[tid] + conf->blk_size);
+
+
+    clock_gettime(CLOCK_MONOTONIC, &conf->start_time);
+    for(int i = 0; i < conf->round; i++){
+        ret += PREAD(conf->fd, conf->buffer, conf->blk_size, conf->rnd_addrs[tid]);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &conf->end_time);
+
+    conf->total_bytes = ret;
+    printf("Thread %d read %lu Bytes in %lu ns.\n", conf->tid, ret, calc_diff(conf->start_time, conf->end_time));
+    pthread_exit(NULL);
+}
+
 void *rnd_write_test(void *vargp){
     config *conf = (config*) vargp;
     uint64_t ret = 0;
@@ -107,7 +127,7 @@ void *rnd_write_test(void *vargp){
 	rnd_buf = malloc(conf->blk_size);
 	//generate the random write test data
     for(uint64_t i = 0; i < (conf->blk_size / sizeof(char)); i++){
-            rnd_buf[i] = conf->tid; //any region that write by this thread will be replaced with its thread ID
+        rnd_buf[i] = conf->tid; //any region that write by this thread will be replaced with its thread ID
     }
 
 	printf("Thread %d created, write range is: \n", conf->tid);
@@ -125,23 +145,47 @@ void *rnd_write_test(void *vargp){
     pthread_exit(NULL);
 }
 
-void *rnd_read_test(void *vargp){
+void *rnd_read_write_test(void *vargp){
     config *conf = (config*) vargp;
     uint64_t ret = 0;
+    int tid = conf->tid;
+    char *rnd_buf;      //the data source for rnd tests
 
-    printf("Thread %d created, read range is: \n", conf->tid);
-    for(int i = 0; i < conf->round; i++){
-        printf("\t%lld - %lld\n", conf->rnd_addrs[i], conf->rnd_addrs[i] + conf->blk_size);
+    //if this is a thread with even thread number, it will be a read operation.
+    if(tid %2 == 0){
+        printf("Thread %d created, read range is: \n", conf->tid);
+        printf("\t%lld - %lld\n", conf->rnd_addrs[tid], conf->rnd_addrs[tid] + conf->blk_size);
+
+        clock_gettime(CLOCK_MONOTONIC, &conf->start_time);
+        for(int i = 0; i < conf->round; i++){
+            ret += PREAD(conf->fd, conf->buffer, conf->blk_size, conf->rnd_addrs[tid]);
+        }
+        clock_gettime(CLOCK_MONOTONIC, &conf->end_time);
+
+        conf->total_bytes = ret;
+        printf("Thread %d read %lu Bytes in %lu ns.\n", conf->tid, ret, calc_diff(conf->start_time, conf->end_time));
+
+    } else { //otherwise it will be a write operation
+
+        rnd_buf = malloc(conf->blk_size);
+        //generate the random write test data
+        for(uint64_t i = 0; i < (conf->blk_size / sizeof(char)); i++){
+            rnd_buf[i] = tid; //any region that write by this thread will be replaced with its thread ID
+        }
+
+        printf("Thread %d created, write range is: \n", tid);
+        printf("\t%lld - %lld\n", conf->rnd_addrs[tid], conf->rnd_addrs[tid] + conf->blk_size);
+
+        clock_gettime(CLOCK_MONOTONIC, &conf->start_time);
+        for(int i = 0; i < conf->round; i++){
+            //write 1s to the pre-determined addresses
+            ret += PWRITE(conf->fd, rnd_buf, conf->blk_size, conf->rnd_addrs[tid]);
+        }
+        clock_gettime(CLOCK_MONOTONIC, &conf->end_time);
+
+        conf->total_bytes = ret;
+        printf("Thread %d write %lu Bytes in %lu ns.\n", conf->tid, ret, calc_diff(conf->start_time, conf->end_time));
     }
-
-    clock_gettime(CLOCK_MONOTONIC, &conf->start_time);
-    for(int i = 0; i < conf->round; i++){
-        ret += PREAD(conf->fd, conf->buffer, conf->blk_size, conf->rnd_addrs[i]);
-    }
-    clock_gettime(CLOCK_MONOTONIC, &conf->end_time);
-
-    conf->total_bytes = ret;
-    printf("Thread %d read %lu Bytes in %lu ns.\n", conf->tid, ret, calc_diff(conf->start_time, conf->end_time));
     pthread_exit(NULL);
 }
 
@@ -158,7 +202,7 @@ int main(int argc, char ** argv){
 	int num_thread = atoi(argv[2]);
 	long long size = atoll(argv[3]);
 	int round = atoll(argv[4]);
-	int rnd_blk_size = 4096;
+	int rnd_blk_size = 4*1024;  //for default 4k test
     long long *rnd_addrs;
     static uint16_t seeds[3] = { 182, 757, 21 };
 
@@ -381,6 +425,46 @@ int main(int argc, char ** argv){
     printf("\tAverage Byte Read in %d rounds: %lu bytes\n", round, total_bytes);
     printf("\tAverage Read Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
     printf("\n");
+
+    /*************************************************************************
+    * beginning of the single file multi-thread random read/write test.
+    *************************************************************************/
+    printf("Starting %d thread(s) RND Read/Write Test\n", num_thread);
+    printf("*************************************************************************\n");
+    real_time = 0;
+    total_bytes = 0;
+    fd = OPEN(path, O_RDWR | O_SYNC, S_IRWXU);
+    for(int i = 0; i < num_thread; i++){
+        conf[i].fd = fd;
+        conf[i].tid = i;
+        conf[i].round = round;
+        conf[i].tnum = num_thread;
+        conf[i].size = size;
+        conf[i].blk_size = rnd_blk_size;
+        conf[i].buffer = buffer;
+        conf[i].total_bytes = 0;
+        conf[i].rnd_addrs = rnd_addrs;
+        conf[i].rnd_buf = rnd_buf;
+        pthread_create(&threads[i], NULL, rnd_read_write_test, (void*)&conf[i]);
+    }
+
+    for(int i = 0; i < num_thread; i++)
+    {
+        pthread_join(threads[i], NULL);
+        real_time += calc_diff(conf[i].start_time, conf[i].end_time);
+        total_bytes += conf[i].total_bytes;
+    }
+    //close file here for writeback time
+    CLOSE(fd);
+
+    real_time = real_time / num_thread;
+    total_bytes = total_bytes / num_thread;
+    printf("Random Read Test Completed with %d Bytes Block: \n", rnd_blk_size);
+    printf("\tAverage Time Used: %lu ns\n", real_time);
+    printf("\tAverage Byte Transfered in %d rounds: %lu bytes\n", round, total_bytes);
+    printf("\tAverage Transfer Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
+    printf("\n");
+
 
 	return 0;
 }
