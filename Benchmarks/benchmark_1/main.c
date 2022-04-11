@@ -56,7 +56,7 @@ long calc_diff(struct timespec start, struct timespec end){
 	(start.tv_sec * (long)(1000000000) + start.tv_nsec);
 }
 
-uint64_t calc_usec(struct timespec t){
+uint64_t calc_nsec(struct timespec t){
     return (t.tv_sec * (long)(1000000000) + t.tv_nsec);
 }
 
@@ -190,7 +190,7 @@ void *rnd_read_write_test(void *vargp){
 }
 
 int main(int argc, char ** argv){
-	if(argc != 5){
+	if(argc != 6){
 		printf("usage: path_to_folder num_thread size round\n");
 		return -1;
 	}
@@ -202,7 +202,7 @@ int main(int argc, char ** argv){
 	int num_thread = atoi(argv[2]);
 	long long size = atoll(argv[3]);
 	int round = atoll(argv[4]);
-	int rnd_blk_size = 4*1024;  //for default 4k test
+    int rnd_blk_size = atoll(argv[5]);  //for default 4k test
     long long *rnd_addrs;
     static uint16_t seeds[3] = { 182, 757, 21 };
 
@@ -252,7 +252,7 @@ int main(int argc, char ** argv){
     end_time = 0;
     real_time = 0;
     total_bytes = 0;
-    fd = OPEN (path, O_WRONLY | O_CREAT | O_SYNC, S_IRWXU);
+    fd = OPEN (path, O_WRONLY | O_CREAT, S_IRWXU);
     for(int i = 0; i < num_thread; i++){
         conf[i].fd = fd;
         conf[i].tid = i;
@@ -267,10 +267,10 @@ int main(int argc, char ** argv){
     for(int i = 0; i < num_thread; i++)
     {
         pthread_join(threads[i], NULL);
-        if(calc_usec(conf[i].start_time) < start_time)
-            start_time = calc_usec(conf[i].start_time); //get the time of the first started thread
-        if(calc_usec(conf[i].end_time) > end_time)
-            end_time = calc_usec(conf[i].end_time); //get the time of the last finished thread
+        if(calc_nsec(conf[i].start_time) < start_time)
+            start_time = calc_nsec(conf[i].start_time); //get the time of the first started thread
+        if(calc_nsec(conf[i].end_time) > end_time)
+            end_time = calc_nsec(conf[i].end_time); //get the time of the last finished thread
         total_bytes += conf[i].total_bytes;
     }
     //close file here to clear the buffer
@@ -293,7 +293,7 @@ int main(int argc, char ** argv){
     end_time = 0;
     real_time = 0;
     total_bytes = 0;
-    fd = OPEN(path, O_RDONLY | O_SYNC, S_IRWXU);
+    fd = OPEN(path, O_RDONLY, S_IRWXU);
     for(int i = 0; i < num_thread; i++){
         conf[i].fd = fd;
         conf[i].tid = i;
@@ -308,10 +308,10 @@ int main(int argc, char ** argv){
     for(int i = 0; i < num_thread; i++)
     {
         pthread_join(threads[i], NULL);
-        if(calc_usec(conf[i].start_time) < start_time)
-            start_time = calc_usec(conf[i].start_time); //get the time of the first started thread
-        if(calc_usec(conf[i].end_time) > end_time)
-            end_time = calc_usec(conf[i].end_time); //get the time of the last finished thread
+        if(calc_nsec(conf[i].start_time) < start_time)
+            start_time = calc_nsec(conf[i].start_time); //get the time of the first started thread
+        if(calc_nsec(conf[i].end_time) > end_time)
+            end_time = calc_nsec(conf[i].end_time); //get the time of the last finished thread
         total_bytes += conf[i].total_bytes;
     }
     //close file here for writeback time
