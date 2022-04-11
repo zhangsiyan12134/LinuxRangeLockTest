@@ -251,6 +251,7 @@ int main(int argc, char ** argv){
     start_time = 18446744073709551615;
     end_time = 0;
     real_time = 0;
+    per_thread_time = 0;
     total_bytes = 0;
     fd = OPEN (path, O_WRONLY | O_CREAT, S_IRWXU);
     for(int i = 0; i < num_thread; i++){
@@ -271,16 +272,19 @@ int main(int argc, char ** argv){
             start_time = calc_nsec(conf[i].start_time); //get the time of the first started thread
         if(calc_nsec(conf[i].end_time) > end_time)
             end_time = calc_nsec(conf[i].end_time); //get the time of the last finished thread
+        per_thread_time += calc_diff(conf[i].start_time, conf[i].end_time);
         total_bytes += conf[i].total_bytes;
     }
     //close file here to clear the buffer
     CLOSE(fd);
 
     real_time = end_time - start_time;
+    per_thread_time = per_thread_time / num_thread;
     printf("Sequential Write Test Completed: \n");
     printf("\tTotal Time Used: %lu ns\n", real_time);
     printf("\tTotal Byte Write in %d rounds: %lu bytes\n", round, total_bytes);
     printf("\tAverage Write Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
+    printf("\tPer Thread Write Speed: %f GB/s\n", ((double)total_bytes / num_thread) / (double)per_thread_time);
     printf("\n");
 
 
@@ -292,6 +296,7 @@ int main(int argc, char ** argv){
     start_time = 18446744073709551615;
     end_time = 0;
     real_time = 0;
+    per_thread_time = 0;
     total_bytes = 0;
     fd = OPEN(path, O_RDONLY, S_IRWXU);
     for(int i = 0; i < num_thread; i++){
@@ -312,16 +317,19 @@ int main(int argc, char ** argv){
             start_time = calc_nsec(conf[i].start_time); //get the time of the first started thread
         if(calc_nsec(conf[i].end_time) > end_time)
             end_time = calc_nsec(conf[i].end_time); //get the time of the last finished thread
+        per_thread_time += calc_diff(conf[i].start_time, conf[i].end_time);
         total_bytes += conf[i].total_bytes;
     }
     //close file here for writeback time
     CLOSE(fd);
 
     real_time = end_time - start_time;
+    per_thread_time = per_thread_time / num_thread;
     printf("Sequential Read Test Completed: \n");
     printf("\tTotal Time Used: %lu ns\n", real_time);
     printf("\tTotal Byte Read in %d rounds: %lu bytes\n", round, total_bytes);
     printf("\tAverage Read Speed: %f GB/s\n", (double)total_bytes / (double)real_time);
+    printf("\tPer Thread Read Speed: %f GB/s\n", ((double)total_bytes / num_thread) / (double)per_thread_time);
 
     for(uint64_t i = 0; i < (size / sizeof(char)); i++)
     {
