@@ -13,8 +13,19 @@ struct ct_fl_t;
 typedef uint16_t uint16;
 pthread_spinlock_t lock_list_spin;
 pthread_mutex_t lock_list_mutex;
+uint8_t mutex_lock;
 
 enum mode{O_RDONLY, O_WRONLY, O_RDWR};
+
+/* per lock list lock acquire */
+void rl_lock_acquire(uint8_t* addr){
+    while(__sync_lock_test_and_set((char*) ((uint64_t)addr), (int)1));
+}
+
+/* per lock list lock release */
+void rl_lock_release(uint8_t* addr){
+    __sync_lock_release((char*) ((uint64_t)addr));
+}
 
 /* block list and wait list segments */
 struct ct_fl_seg{
@@ -56,6 +67,13 @@ char* enum_to_string(int mode){
             return "UNKNOWN";
     }
 }
+
+typedef struct{
+    int tid;
+    int en_delete;
+    struct timespec start_time;
+    struct timespec end_time;
+}config;
 
 void ctfs_lock_add_blocking(ct_fl_t *current, ct_fl_t *node){
     /* add the conflicted node into the head of the blocking list of the current node*/
@@ -148,17 +166,20 @@ ct_fl_t* ctfs_lock_list_add_node(int fd, off_t start, size_t n, int flag){
     temp->node_id = temp;
 
     //pthread_spin_lock(&lock_list_spin);
-    pthread_mutex_lock(&lock_list_mutex);
+    //pthread_mutex_lock(&lock_list_mutex);
+    rl_lock_acquire(&mutex_lock);
 
     if(head != NULL){
         tail = head;   //get the head of the lock list
         while(tail != NULL){
             //check if current list contains a lock that is not compatable
-            if(check_overlap(tail, temp) && check_access_conflict(tail, temp)){
-                ctfs_lock_add_blocking(temp, tail); //add the conflicted lock into blocking list
-                printf("\tNode %p is blocking the Node %p\n", tail, temp);
-                ctfs_lock_add_waiting(temp, tail); //add the new node to the waiting list of the conflicted node
-                printf("\tNode %p is waiting the Node %p\n", temp, tail);
+            if(check_access_conflict(tail, temp)){
+                if(check_overlap(tail, temp)){
+                    ctfs_lock_add_blocking(temp, tail); //add the conflicted lock into blocking list
+                    printf("\tNode %p is blocking the Node %p\n", tail, temp);
+                    ctfs_lock_add_waiting(temp, tail); //add the new node to the waiting list of the conflicted node
+                    printf("\tNode %p is waiting the Node %p\n", temp, tail);
+                }
             }
             last = tail;
             tail = tail->fl_next;
@@ -170,7 +191,8 @@ ct_fl_t* ctfs_lock_list_add_node(int fd, off_t start, size_t n, int flag){
     }
     printf("Node %p added, Range: %u - %u, mode: %s\n", temp, temp->fl_start, temp->fl_end, enum_to_string(temp->fl_type));
 
-    pthread_mutex_unlock(&lock_list_mutex);
+    rl_lock_release(&mutex_lock);
+    //pthread_mutex_unlock(&lock_list_mutex);
     //pthread_spin_unlock(&lock_list_spin);
 
     return temp;
@@ -182,7 +204,9 @@ void ctfs_lock_list_remove_node(ct_fl_t *node){
     ct_fl_t *prev, *next;
 
     //pthread_spin_lock(&lock_list_spin);
-    pthread_mutex_lock(&lock_list_mutex);
+    //pthread_mutex_lock(&lock_list_mutex);
+    rl_lock_acquire(&mutex_lock);
+
     prev = node->fl_prev;
     next = node->fl_next;
     if (prev == NULL){
@@ -200,7 +224,8 @@ void ctfs_lock_list_remove_node(ct_fl_t *node){
     ctfs_lock_remove_blocking(node);
     printf("Node %p removed, Range: %u - %u, mode: %s\n", node, node->fl_start, node->fl_end, enum_to_string(node->fl_type));
 
-    pthread_mutex_unlock(&lock_list_mutex);
+    rl_lock_release(&mutex_lock);
+    //pthread_mutex_unlock(&lock_list_mutex);
     //pthread_spin_unlock(&lock_list_spin);
 
     free(node);
@@ -237,30 +262,38 @@ void print_all_info(){
     //pthread_spin_unlock(&lock_list_spin);
 }
 
-void* __attribute__((optimize("O0"))) request_simulation(void *en_delete){
-    ct_fl_t *node1;
-    int flag = *((int *) en_delete);
+long calc_diff(struct timespec start, struct timespec end){
+	return (end.tv_sec * (long)(1000000000) + end.tv_nsec) -
+	(start.tv_sec * (long)(1000000000) + start.tv_nsec);
+}
 
+void* __attribute__((optimize("O0"))) request_simulation(void *vargp){
+    ct_fl_t *node1;
+    config *conf = (config*) vargp;
+    int flag = conf->en_delete;
     static uint16 seeds[3] = { 182, 757, 21 };
     off_t start = nrand48(seeds) % (100 + 1);
     size_t size = nrand48(seeds) % (50 + 1 - 1) + 1;
     int rw_mode= nrand48(seeds) % (2 + 1);
 
+    clock_gettime(CLOCK_MONOTONIC, &conf->start_time);
     node1 = ctfs_lock_list_add_node(10086, start, 20, rw_mode);
     if(flag){
         while(node1->fl_block != NULL){} //wait for blocker finshed
-        sleep(size / 100);  //simulate the reading latency(1/100 of the size)
         ctfs_lock_list_remove_node(node1);
     }
+    clock_gettime(CLOCK_MONOTONIC, &conf->end_time);
+
     pthread_exit(NULL);
 }
 
 
 int main(int argc, char *argv[]) {
     //********************settings**********************
-    static int nthread = 64; //number of threads
+    static int nthread = 8; //number of threads
     static int en_delete = TRUE; //enable the node deletion?
     //**************************************************
+
     if( argc == 3 ) {
       nthread = atoi(argv[1]);
       en_delete = atoi(argv[2]);
@@ -269,11 +302,16 @@ int main(int argc, char *argv[]) {
        printf("lock_test #threads [0|1]\n");
    }
 
-    pthread_spin_init(&lock_list_spin, 0);
+    //pthread_spin_init(&lock_list_spin, 0);
     pthread_t threads[nthread];
+    config conf[nthread];
+    long time_used = 0;
+
     printf("********************** Transactions **********************\n");
     for(int i = 0; i < nthread; i++){
-        pthread_create(&threads[i], NULL, request_simulation, &en_delete);
+        conf[i].tid = i;
+        conf[i].en_delete = en_delete;
+        pthread_create(&threads[i], NULL, request_simulation, (void*)&conf[i]);
     }
 
     for(int i = 0; i < nthread; i++){
@@ -281,8 +319,12 @@ int main(int argc, char *argv[]) {
     }
 
     print_all_info();
-
-    pthread_spin_destroy(&lock_list_spin);
+    printf("**********************************************************\n");
+    for(int i = 0; i < nthread; i++){
+        time_used = calc_diff(conf[i].start_time, conf[i].end_time);
+        printf("Thread %d completed in %ld nsec\n", i, time_used);
+    }
+    //pthread_spin_destroy(&lock_list_spin);
 
     return 0;
 }
